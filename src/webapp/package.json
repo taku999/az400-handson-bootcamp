@@ -27,7 +27,7 @@
     "@azure/keyvault-secrets": "^4.7.0"
   },
   "devDependencies": {
-    "jest": "^29.7.0",
+    "jest": "^30.3.0",
     "supertest": "^6.3.4",
     "eslint": "^8.56.0",
     "nodemon": "^3.0.3"
