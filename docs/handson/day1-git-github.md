@@ -33,14 +33,34 @@
 
 #### 1.1 GitHubリポジトリ作成とPush
 
-**前提**: ローカルに既に `az400-handson-bootcamp` リポジトリがある場合（このテンプレートをクローン済み）
+**⚠️ 重要**: 後のステップ（3.0）で CODEOWNERS を使用するため、**Organization 配下でリポジトリを作成することを強く推奨**します。
+
+**推奨手順（Organization 配下で作成）**:
 
 ```bash
 # 現在のディレクトリ確認
 pwd
 # 出力例: C:\Users\bell9\github\az400-handson-bootcamp
 
-# GitHubでリポジトリ作成（Web UIまたはGH CLI）
+# Organization配下でリポジトリ作成（GitHub CLI使用）
+# まず Organization を作成（Web UI または CLI）:
+# Web UI: https://github.com/account/organizations/new
+# Organization 名: az400-handson-org（または任意の名前）
+
+# Organization 配下でリポジトリ作成
+gh repo create az400-handson-org/az400-handson-bootcamp --public --source=. --remote=origin
+
+# リモート追加（手動の場合）
+git remote add origin https://github.com/az400-handson-org/az400-handson-bootcamp.git
+
+# 初回Push
+git branch -M main
+git push -u origin main
+```
+
+**代替手順（個人アカウントで作成 → 後で Organization に移譲）**:
+
+```bash
 # 方法1: GitHub CLI使用
 gh repo create az400-handson-bootcamp --public --source=. --remote=origin
 
@@ -59,15 +79,21 @@ git branch -M main
 git push -u origin main
 ```
 
+**注意**: 個人アカウントで作成した場合、ステップ 3.0 で Organization への移譲が必要になります。
+
 **新規にリポジトリを作成する場合**:
 
 ```bash
-# GitHubでリポジトリ作成後
-git clone https://github.com/<your-github-username>/az400-handson-bootcamp.git
+# Organization 配下でリポジトリ作成後（Web UI または CLI）
+git clone https://github.com/az400-handson-org/az400-handson-bootcamp.git
 cd az400-handson-bootcamp
 
 # このテンプレートリポジトリの内容をコピー
 # （handson-bootcampフォルダの内容を新リポジトリにコピー）
+
+# ※ 個人アカウントで作成した場合
+git clone https://github.com/<your-github-username>/az400-handson-bootcamp.git
+cd az400-handson-bootcamp
 ```
 
 #### 1.2 Azure DevOpsプロジェクト作成
@@ -252,25 +278,214 @@ New → Active → Resolved → Closed
 
 ### ステップ 3: Git高度操作（60分）
 
-#### 3.1 CODEOWNERS設定
+#### 3.0 GitHub Organization とチーム作成（準備）
+
+**重要**: CODEOWNERS に記載される **@az400-admin や @infra-team などの "チーム" は GitHub Organization 内でのみ作成可能**です。個人リポジトリ単体では作れません。
+
+##### 3.0.1 GitHub Organization の作成
+
+**手順**:
+
+1. GitHub の右上アイコンをクリック → **Your organizations** を選択
+2. **New organization** をクリック
+3. プランを選択:
+   - **Free** を選択（個人学習用なら無料で十分）
+4. Organization 名を入力:
+   - 例: `az400-handson-org`（グローバルでユニークな名前が必要）
+5. 連絡先メールアドレスを入力
+6. **This organization belongs to:** で **My personal account** を選択
+7. **Next** をクリック
+8. （オプション）メンバー招待をスキップして **Complete setup** をクリック
+
+**確認**: Organization URL: `https://github.com/az400-handson-org`
+
+##### 3.0.2 既存リポジトリを Organization に移管（Transfer）
+
+**重要**: ステップ 1.1 で個人アカウント配下にリポジトリを作成した場合、Organization に移管する必要があります。最初から Organization 配下で作成した場合は、このステップをスキップして 3.0.3 に進んでください。
+
+**手順**:
+
+1. GitHub で移動したいリポジトリ（`az400-handson-bootcamp`）を開く
+2. 上部タブ → **Settings** をクリック
+3. 左メニューを最下部までスクロール → **Danger Zone** セクションを表示
+4. **Transfer ownership** の **Transfer** ボタンをクリック
+5. ダイアログが表示されるので、以下を入力:
+   - **New owner**: Organization 名を入力（例: `az400-handson-org`）
+   - 確認用にリポジトリ名を再入力: `az400-handson-bootcamp`
+6. **I understand, transfer this repository** をチェック
+7. **Transfer this repository** ボタンをクリック
+
+**確認**:
+- リポジトリ URL が変更されます:
+  - 変更前: `https://github.com/<your-username>/az400-handson-bootcamp`
+  - 変更後: `https://github.com/az400-handson-org/az400-handson-bootcamp`
+- Organization のリポジトリ一覧に表示されることを確認
+
+**⚠️ ローカルリポジトリのリモート URL を更新**:
+
+Transfer 後は、ローカルの Git 設定を更新する必要があります:
 
 ```bash
+# 現在のリモート URL を確認
+git remote -v
+# 出力例: origin  https://github.com/<your-username>/az400-handson-bootcamp.git (fetch)
+
+# リモート URL を Organization のものに変更
+git remote set-url origin https://github.com/az400-handson-org/az400-handson-bootcamp.git
+
+# 変更確認
+git remote -v
+# 出力例: origin  https://github.com/az400-handson-org/az400-handson-bootcamp.git (fetch)
+
+# 接続テスト
+git fetch
+```
+
+**よくあるつまずきポイント**:
+
+| 問題 | 原因 | 解決方法 |
+|------|------|----------|
+| Transfer ボタンが見つからない | Danger Zone が表示されていない | ページを下までスクロールする |
+| Organization 名の入力エラー | Organization が存在しない | 先に 3.0.1 で Organization を作成 |
+| "You don't have permission" エラー | Organization のオーナーでない | Organization のオーナー権限を確認 |
+| ローカルで git push できない | リモート URL が古いまま | `git remote set-url` でURLを更新 |
+
+**Transfer のメリット**:
+- ✅ CODEOWNERS でチーム指定が可能になる
+- ✅ Organization レベルのセキュリティポリシーが適用される
+- ✅ チームベースのアクセス管理が可能になる
+- ✅ コミット履歴・Issue・PR は全て保持される
+
+---
+
+##### 3.0.3 Organization 内でチームを作成
+
+**手順**:
+
+1. Organization ページで左メニュー → **Teams** をクリック
+2. **New team** をクリック
+3. 以下のチームを順番に作成:
+   - `az400-admin`
+   - `infra-team`
+   - `webapp-team`
+   - `devops-team`
+   - `learning-team`
+
+**各チーム作成時の設定**:
+
+- **Team name**: 上記のチーム名を入力
+- **Description**: （オプション）例: "Infrastructure team for Bicep code reviews"
+- **Team visibility**: **Visible** を選択（デフォルト）
+- **Create team** をクリック
+
+##### 3.0.4 チームにメンバーを追加
+
+**手順**（各チームで実施）:
+
+1. 作成したチームを開く
+2. **Members** タブ → **Add a member** をクリック
+3. 自分の GitHub アカウントを追加
+
+**ハンズオン用の簡略化**:
+- 自分一人を全チーム（az400-admin、infra-team、webapp-team、devops-team、learning-team）に追加してOK
+- 実務では役割に応じて異なるメンバーを配置
+
+##### 3.0.5 チームにリポジトリへのアクセス権を付与
+
+**重要**: CODEOWNERS が機能するには、チームがリポジトリにアクセスできる必要があります。
+
+**前提**: 3.0.2 でリポジトリを Organization に移管済みであること
+
+**手順**:
+
+1. Organization ページ → **Repositories** → 対象リポジトリ（`az400-handson-bootcamp`）を選択
+2. リポジトリの **Settings** → 左メニュー **Collaborators and teams** をクリック
+3. **Add teams** をクリック
+4. 各チームを追加し、権限レベルを設定:
+   - `az400-admin`: **Maintain** または **Admin**
+   - `infra-team`: **Write**
+   - `webapp-team`: **Write**
+   - `devops-team`: **Write**
+   - `learning-team`: **Write**
+
+**権限レベルの意味**:
+- **Read**: 閲覧のみ
+- **Write**: PR作成、レビュー、マージ可能
+- **Maintain**: 設定変更可能（Issue/PR管理）
+- **Admin**: 全権限
+
+##### 3.0.6 CODEOWNERS の正しい記法
+
+GitHub の Organization チームは **@organization-name/team-name** 形式で指定します。
+
+**例**（Organization 名が `az400-handson-org` の場合）:
+
+```
+# インフラコード（Bicep）
+/infra/bicep/**           @az400-handson-org/az400-admin @az400-handson-org/infra-team
+
+# Webアプリケーション
+/src/webapp/**            @az400-handson-org/webapp-team
+
+# CI/CDパイプライン
+/.github/workflows/**     @az400-handson-org/devops-team
+/.azure/pipelines/**      @az400-handson-org/devops-team
+
+# ドキュメント
+/docs/**                  @az400-handson-org/learning-team
+```
+
+**⚠️ よくあるつまずきポイント（AZ-400 試験対策）**:
+
+| 問題 | 原因 | 解決方法 |
+|------|------|----------|
+| チーム名だけ書いても動かない | `@team-name` では不十分 | `@org/team-name` 形式に修正 |
+| "Team not found" エラー | Organization にチームが存在しない | Organization でチーム作成 |
+| PR にレビュアーが自動アサインされない | チームにリポジトリ権限がない | Write 以上の権限を付与 |
+| CODEOWNERS が無視される | ファイル配置場所が間違い | `.github/CODEOWNERS` または `/CODEOWNERS` に配置 |
+
+**ハンズオン用推奨構成（卓さん向け）**:
+
+```
+Organization: az400-handson-org（または任意の名前）
+├─ Teams:
+│   ├─ az400-admin（あなた）
+│   ├─ infra-team（あなた）
+│   ├─ webapp-team（あなた）
+│   ├─ devops-team（あなた）
+│   └─ learning-team（あなた）
+└─ Repository: az400-handson-bootcamp
+    └─ 全チームに Write 権限付与
+```
+
+これで **実務に近い CODEOWNERS + Branch Protection Rules の演習** が可能になります。
+
+---
+
+#### 3.1 CODEOWNERS設定
+
+**前提**: 上記 3.0 で Organization 作成、リポジトリ移管、チーム作成を完了していること
+
+```bash
+# Organization 名を変数に設定（実際の名前に置き換え）
+ORG_NAME="az400-handson-org"
+
 # ファイル作成
-cat > .github/CODEOWNERS << 'EOF'
+cat > .github/CODEOWNERS << EOF
 # CODEOWNERS - AZ-400 ハンズオン用
 
 # インフラコード（Bicep）
-/infra/bicep/**           @az400-admin @infra-team
+/infra/bicep/**           @${ORG_NAME}/az400-admin @${ORG_NAME}/infra-team
 
 # Webアプリケーション
-/src/webapp/**            @webapp-team
+/src/webapp/**            @${ORG_NAME}/webapp-team
 
 # CI/CDパイプライン
-/.github/workflows/**     @devops-team
-/.azure/pipelines/**      @devops-team
+/.github/workflows/**     @${ORG_NAME}/devops-team
+/.azure/pipelines/**      @${ORG_NAME}/devops-team
 
 # ドキュメント
-/docs/**                  @learning-team
+/docs/**                  @${ORG_NAME}/learning-team
 EOF
 
 git add .github/CODEOWNERS
@@ -279,10 +494,25 @@ git push origin main
 ```
 
 **動作確認**:
+
 1. ブランチ作成: `git checkout -b test-codeowners`
-2. `infra/bicep/test.bicep` を作成
-3. Push して PR 作成
-4. PR に自動的にレビュアーがアサインされることを確認
+2. テストファイル作成:
+   ```bash
+   mkdir -p infra/bicep
+   echo "// Test Bicep file" > infra/bicep/test.bicep
+   git add infra/bicep/test.bicep
+   git commit -m "test: CODEOWNERS動作確認用ファイル"
+   git push origin test-codeowners
+   ```
+3. GitHub Web UI で PR 作成
+4. PR の右サイドバー **Reviewers** セクションを確認:
+   - `@az400-handson-org/az400-admin` と `@az400-handson-org/infra-team` が自動的にリクエストされていることを確認
+
+**トラブルシューティング**:
+- レビュアーが自動アサインされない場合:
+  - チームにリポジトリの Write 権限があるか確認
+  - CODEOWNERS のパス形式が正しいか確認（`/infra/bicep/**`）
+  - Organization 名が正しいか確認（`@org/team`）
 
 #### 3.2 SemVer実践
 
