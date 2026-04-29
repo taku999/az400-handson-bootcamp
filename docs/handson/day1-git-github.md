@@ -31,30 +31,192 @@
 
 ### ステップ 1: 環境セットアップ（30分）
 
-#### 1.1 GitHubリポジトリ作成
+#### 1.1 GitHubリポジトリ作成とPush
+
+**前提**: ローカルに既に `az400-handson-bootcamp` リポジトリがある場合（このテンプレートをクローン済み）
 
 ```bash
+# 現在のディレクトリ確認
+pwd
+# 出力例: C:\Users\bell9\github\az400-handson-bootcamp
+
 # GitHubでリポジトリ作成（Web UIまたはGH CLI）
-gh repo create az400-handson-bootcamp --public
+# 方法1: GitHub CLI使用
+gh repo create az400-handson-bootcamp --public --source=. --remote=origin
 
-# クローン
-git clone https://github.com/<your-username>/az400-handson-bootcamp.git
-cd az400-handson-bootcamp
+# 方法2: Web UIで作成する場合
+# 1. https://github.com/new にアクセス
+# 2. Repository name: az400-handson-bootcamp
+# 3. Public または Private を選択
+# 4. "Create repository" をクリック
+# 5. 作成後、以下のコマンドでリモート追加
 
-# このテンプレートリポジトリの内容をコピー
-# （handson-bootcampフォルダの内容を新リポジトリにコピー）
+git remote add origin https://github.com/<your-github-username>/az400-handson-bootcamp.git
+# ↑ <your-github-username> を実際のGitHubユーザー名に置き換え（例: bell999）
+
+# 初回Push
+git branch -M main
+git push -u origin main
 ```
 
-#### 1.2 Azure DevOpsプロジェクト作成
+**新規にリポジトリを作成する場合**:
+
+```bash
+# GitHubでリポジトリ作成後
+git clone https://github.com/<your-github-username>/az400-handson-bootcamp.git
+cd az400-handson-bootcamp
+
+# テンプレートファイルをコピー（元のリポジトリから）
+```
+
+#### 1.2 Gitブランチをmainにリネーム（既にmasterの場合）
+
+**既にブランチがmainの場合は、このステップをスキップしてください。**
+
+既存のリポジトリでローカル・リモート両方のブランチが`master`の場合、以下の手順で`main`に変更します：
+
+```bash
+# ステップ1: ローカルブランチをmainに変更
+git branch -m master main
+
+# ステップ2: リモートにmainブランチをプッシュ
+git push -u origin main
+
+# ステップ3: リモートHEADをmainに変更
+git remote set-head origin main
+
+# ステップ4: GitHub CLIでデフォルトブランチを変更
+gh repo edit <your-github-username>/az400-handson-bootcamp --default-branch main
+
+# 方法4-2: GitHub Web UIで変更する場合
+# 1. https://github.com/<your-github-username>/az400-handson-bootcamp/settings/branches を開く
+# 2. ページ上部の「Default branch」セクションで切り替えアイコン（⇄）をクリック
+# 3. ドロップダウンから「main」を選択
+# 4. 「I understand, update the default branch」をクリック
+
+# ステップ5: リモートのmasterブランチを削除
+git push origin --delete master
+
+# ステップ6: ローカルの参照を整理
+git fetch --prune
+
+# 確認
+git branch -a
+# 出力: * main
+#       remotes/origin/HEAD -> origin/main
+#       remotes/origin/main
+```
+
+**期待される結果**:
+- ローカル: `main` のみ
+- リモート: `origin/main` のみ（`origin/master` は削除済み）
+- `origin/HEAD` が `origin/main` を指している
+
+#### 1.3 Branch Protection設定（ブランチ保護）
+
+GitHubで`main`ブランチに保護ルールを設定し、誤った操作を防ぎます。
+
+**GitHub CLIで設定する場合**:
+
+```bash
+# ブランチ保護設定ページを開く
+start https://github.com/<your-github-username>/az400-handson-bootcamp/settings/branch_protection_rules/new
+# 例: start https://github.com/taku999/az400-handson-bootcamp/settings/branch_protection_rules/new
+```
+
+**Web UIで設定する場合**:
+
+1. GitHub リポジトリページ > **Settings** > **Branches**
+2. 「Branch protection rules」セクションで **Add rule** をクリック
+3. 以下を設定：
+
+**Branch name pattern（必須）**:
+```
+main
+```
+
+**Protect matching branches（保護ルール）**:
+
+基本的な保護:
+- ✅ **Require a pull request before merging** （PR必須）
+  - **Require approvals**: `1` （最低1人の承認）
+    - **注意**: GitHubの仕様上、`0`に設定することはできません
+    - **1人で作業している場合**: 下記の「Do not allow bypassing」のチェックを外して管理者がバイパス可能にする
+  - ✅ **Dismiss stale pull request approvals when new commits are pushed** （新コミット時に承認リセット）
+
+推奨設定:
+- ✅ **Require conversation resolution before merging** （コメント解決必須）
+- ✅ **Do not allow bypassing the above settings** （管理者も保護ルールに従う）
+  - **1人で作業している場合**: このチェックを外すと、管理者（リポジトリオーナー）はApprovalなしでPRをマージ可能
+
+オプション（Day 3のCI/CD実装後に有効化推奨）:
+- ⬜ **Require status checks to pass before merging** （CI/CDテスト成功必須）
+  - パイプライン実装後に有効化
+- ⬜ **Require linear history** （リベースのみ、マージコミット禁止）
+
+4. ページ下部の **「Create」** ボタンをクリック
+
+**設定完了の確認**:
+
+```bash
+# 試しにmainに直接pushしてみる（拒否されるはず）
+echo "# Test" > test-protection.txt
+git add test-protection.txt
+git commit -m "test: branch protection test"
+git push origin main
+# 期待されるエラー: remote: error: GH006: Protected branch update failed
+```
+
+保護が有効な場合、以下のエラーが表示されます：
+```
+remote: error: GH006: Protected branch update failed for refs/heads/main.
+```
+
+これで、`main`への直接pushが禁止され、必ずPull Request経由でマージする必要があります。
+
+**効果**:
+- ✅ Force push禁止（履歴の破壊を防ぐ）
+- ✅ ブランチ削除禁止
+- ✅ 直接コミット禁止（PR必須）
+- ✅ レビュー承認必須
+- ✅ レビューコメント解決必須
+
+**1人で作業している場合のPRマージ方法**:
+
+**方法1: 管理者バイパスを有効化（推奨）**
+1. 「Do not allow bypassing the above settings」の **チェックを外す**
+2. PR作成後、GitHub Web UIで **「Merge without waiting for requirements to be met (bypass branch protections)」** を選択
+3. 管理者権限でApprovalなしでマージ可能
+4. 実務で管理者権限を持つ場合の動作を学習できる
+
+**方法2: 別アカウントでApproval（チーム開発の練習）**
+1. 別のGitHubアカウントをコラボレーターとして追加
+2. そのアカウントでPRをApprove
+3. 本番環境に近い運用を練習できる
+
+**方法3: PR要件を緩和（非推奨：学習目的のみ）**
+1. 「Require a pull request before merging」自体の **チェックを外す**
+2. ブランチ保護は残るが、PRなしで直接mainにpush可能になる
+3. 学習には不向きだが、テスト目的では選択肢になる
+
+**AZ-400試験では「方法1」の動作理解が重要**:
+- Q: "管理者がブランチ保護ルールをバイパスできるようにするには？"
+- A: 「Do not allow bypassing the above settings」のチェックを外す
+
+#### 1.4 Azure DevOpsプロジェクト作成
+
+**既に README.md の手順でプロジェクトを作成済みの場合は、このステップをスキップしてください。**
 
 1. https://dev.azure.com にアクセス
 2. 「New Project」をクリック
-3. プロジェクト名: `AZ400-Handson`
+3. プロジェクト名: `az400-handson`
 4. Visibility: Private
 5. Work item process: **Agile**（重要）
 6. 「Create」をクリック
 
-#### 1.3 ローカル環境確認
+**確認**: プロジェクトURL: `https://dev.azure.com/<your-org>/az400-handson`
+
+#### 1.5 ローカル環境確認
 
 ```bash
 # Azureログイン
@@ -75,7 +237,12 @@ npm --version
 
 #### 2.1 Work Item作成
 
-Azure DevOps で以下の Work Item を作成：
+**既に README.md の手順で Work Items を作成済みの場合**:
+- `scripts/setup/import-workitems.ps1` で66個のWork Itemsを作成済み
+- `scripts/setup/link-workitems.ps1` で親子関係を設定済み
+- このセクションはスキップして 2.2 に進んでください
+
+**手動で作成する場合**: Azure DevOps で以下の Work Item を作成：
 
 ```
 Epic #1: AZ-400ハンズオン環境構築
@@ -111,18 +278,96 @@ Epic #1: AZ-400ハンズオン環境構築
 #### 2.3 AB#記法テスト
 
 ```bash
-# テストコミット
-echo "# AZ-400 Handson" > README.md
-git add README.md
-git commit -m "fixes AB#1: プロジェクト初期化"
+# README.mdが既にある場合は別のファイルで実施
+echo "# AZ-400 Handson - Day 1" > docs/day1-progress.md
+git add docs/day1-progress.md
+
+# AB#の後にはあなたのEpic Work Item IDを指定
+# import-workitems.ps1 を実行した場合、Epic ID は 508
+git commit -m "fixes AB#508: Day 1開始"
 git push origin main
 ```
 
 **確認**:
-- Azure DevOps > Boards > Work Items > Epic #1 を開く
+- Azure DevOps > Boards > Work Items > Epic (ID: 508) を開く
 - 「Development」セクションにコミットがリンクされていることを確認
+- リンクされていない場合は、GitHub統合設定を確認
+
+**AB#記法の構文**:
+- `fixes AB#<ID>`: Work Itemを完了状態に移行
+- `AB#<ID>`: Work Itemにリンクのみ（状態変更なし）
 
 #### 2.4 Cycle Time vs Lead Time 理解
+
+**確認場所**: Azure DevOps Web UI > **Overview > Dashboards**
+
+**操作手順**:
+1. https://dev.azure.com/<your-org>/az400-handson にアクセス
+2. 左サイドバーから **Overview** をクリック
+3. サブメニューから **Dashboards** を選択
+4. 既存のダッシュボードを開くか、**+ New Dashboard** で新規作成
+5. **Add a widget** をクリック
+6. ウィジェットギャラリーで **"Cycle Time"** または **"Lead Time"** を検索
+7. ウィジェットを選択して **Add** をクリック
+8. ウィジェット設定で対象のWork Itemタイプ（User Story、Task等）を選択
+9. **時間範囲（Time period）** を設定:
+   - **推奨**: **"Rolling period"** > **"Last 30 days"** を選択
+   - **注意**: 期間は **最低14日間以上** 必要です
+   - **手動設定する場合**: Start dateとEnd dateの差を14日以上にする
+   - **エラー例**: "14 days is the minimum allowable time period." → 期間を延長してください
+10. グラフで可視化されたCycle Time/Lead Timeを確認
+
+**⚠️ よくあるエラーと解決方法**:
+
+**エラー**: `14 days is the minimum allowable time period.`
+
+**原因**: Start dateとEnd dateの期間が14日未満
+
+**解決方法**:
+```
+❌ NG: 2026/04/20 ～ 2026/04/29 (10日間)
+✅ OK: 2026/04/15 ～ 2026/04/29 (15日間)
+✅ 推奨: "Last 30 days" を選択（自動で過去30日間）
+```
+
+**なぜ14日間が最小なのか**:
+- Cycle Time/Lead Timeは **トレンド分析** のためのメトリクス
+- 短期間では統計的に意味のある傾向が見えない
+- 最低14日間のデータでパターンを把握するのがベストプラクティス
+
+**Analytics viewsとの違い**:
+- **Analytics views**: データソースの定義（どのWork Itemを分析するか）
+- **Dashboards**: 実際の可視化・グラフ表示（Cycle Time/Lead Timeウィジェットを配置）
+
+**🤖 自動追跡の仕組み（重要）**:
+
+**手動で時間を入力する必要はありません！** Work Itemの **State（状態）** を変更するだけで、Azure DevOpsが自動的にタイムスタンプを記録し、Cycle Time/Lead Timeを計算します。
+
+**必要な操作**:
+- ✅ Work Itemの状態を変更する（New → Active → Closed）
+- ❌ 開始時間・終了時間を手動入力（不要）
+
+**自動記録されるフィールド**:
+- `System.CreatedDate`: Work Item作成日時
+- `Microsoft.VSTS.Common.ActivatedDate`: Active状態になった日時
+- `Microsoft.VSTS.Common.ClosedDate`: Closed状態になった日時
+
+これらのタイムスタンプから、自動的にCycle Time/Lead Timeが計算されます。
+
+**実践例**:
+```
+1. Work Item作成 → "New" (2026/04/29 09:00 自動記録)
+   ↓
+2. 作業開始 → "Active" に変更 (2026/04/29 10:00 自動記録)
+   ↓
+3. 完了 → "Closed" に変更 (2026/04/30 15:00 自動記録)
+   ↓
+4. 自動計算:
+   - Cycle Time = 29時間（Active → Closed）
+   - Lead Time = 30時間（New → Closed）
+```
+
+**概念**:
 
 **Cycle Time**: 作業開始（Active）→ 完了（Done）までの時間
 **Lead Time**: 作成（New）→ 完了（Done）までの時間
@@ -136,6 +381,7 @@ New → Active → Resolved → Closed
 **試験ひっかけポイント**:
 - "作業開始から完了まで" = Cycle Time
 - "作成から完了まで" = Lead Time
+- "Cycle Time/Lead Timeを可視化する場所" = Dashboards（Analytics viewsではない）
 
 ---
 
@@ -236,15 +482,21 @@ git push origin v1.1.0
 
 ### ステップ 4: ブランチ戦略実践（90分）
 
-#### 4.1 Branch Protection設定
+#### 4.1 Branch Protection詳細設定（オプション）
 
-GitHub > Settings > Branches > Add rule:
+**既にステップ 1.3 でBranch Protection基本設定を完了している場合は、このステップをスキップするか、CI/CD実装後に追加設定してください。**
 
-- Branch name pattern: `main`
-- ✅ Require pull request reviews before merging
-- ✅ Require status checks to pass before merging
-- ✅ Require conversation resolution before merging
-- ✅ Do not allow bypassing the above settings
+GitHub > Settings > Branches > 既存のルールを編集:
+
+CI/CD実装後の追加設定（Day 3以降）:
+- ✅ **Require status checks to pass before merging** （CI/CDテスト成功必須）
+  - Status checks: テスト、ビルド、Lintなど
+  - ✅ **Require branches to be up to date before merging** （最新状態必須）
+
+その他の高度な設定:
+- ✅ **Require linear history** （リベースのみ、マージコミット禁止）
+- ✅ **Require deployments to succeed before merging** （デプロイ成功必須）
+- ⬜ **Lock branch** （読み取り専用にする）
 
 #### 4.2 GitHub Flow実装
 
