@@ -358,6 +358,122 @@ git fetch
 
 ---
 
+##### 3.0.2.1 Azure DevOps側でGitHub接続を再設定（重要）
+
+**⚠️ リポジトリをOrganizationに移管した場合、Azure DevOps側でもGitHub接続の更新が必要です。**
+
+リポジトリ移管後、Organization配下のリポジトリがAzure DevOpsに表示されない場合は、以下のいずれかの方法で対応してください。
+
+---
+
+**方法1: GitHub側でOAuth権限を承認（最も簡単）**
+
+**手順**:
+
+1. **GitHubにログイン** → 右上のアイコン → **Settings**
+
+2. 左メニュー → **Applications** → **Authorized OAuth Apps** タブを選択
+
+3. **Azure DevOps** または **Azure Boards** を探してクリック
+
+4. **Organization access** セクションで、対象のOrganization（`az400-handson-org`）を確認:
+   - ❌ **Request** または **Grant** ボタンが表示されている場合
+     - **Request** をクリック（Organizationオーナーの場合は即座に承認される）
+     - Organizationの別のオーナーがいる場合は承認を待つ
+   
+   - ✅ すでに **Granted** と表示されている場合
+     - 権限は付与済み（方法2へ）
+
+5. **Save** をクリック
+
+6. Azure DevOpsに戻り、GitHub Connectionsページを **リロード**
+
+7. リポジトリ選択画面でOrganization配下のリポジトリが表示されることを確認
+
+---
+
+**方法2: Azure DevOps側でGitHub接続を再作成**
+
+権限を承認しても表示されない場合、接続を作り直します:
+
+**手順（Azure DevOps側）**:
+
+1. Azure DevOps → **Project Settings** → **GitHub connections**
+
+2. 既存の接続があれば **Remove** （削除）
+
+3. **Connect your GitHub account** をクリック
+
+4. GitHubで認証（ポップアップが表示される）
+
+5. **Organization access** の画面が表示された場合:
+   - 対象のOrganization（`az400-handson-org`）の横の **Grant** をクリック
+   - または **Request** をクリックして承認
+
+6. 認証完了後、リポジトリ選択画面で **Organization配下のリポジトリ** が表示されることを確認
+
+7. `az400-handson-org/az400-handson-bootcamp` を選択
+
+8. **Save**
+
+---
+
+**方法3: GitHub App方式に切り替え（最新の推奨方法）**
+
+Azure DevOpsは現在、**OAuth App** と **GitHub App** の2つの接続方式をサポートしています。GitHub Appの方が権限管理が明確です。
+
+**手順**:
+
+1. Azure DevOps → **Project Settings** → **GitHub connections**
+
+2. **New connection** → **GitHub App** を選択（OAuth Appではなく）
+
+3. **Install Azure Boards** をクリック
+
+4. GitHubに遷移し、**Install on organization** を選択
+
+5. Organization（`az400-handson-org`）を選択
+
+6. **Repository access**:
+   - **Only select repositories** を選択
+   - `az400-handson-bootcamp` にチェック
+
+7. **Install** をクリック
+
+8. Azure DevOpsに戻り、接続が確立されたことを確認
+
+---
+
+**動作確認（AB#記法テスト）**:
+
+接続完了後、AB#記法が機能するかテスト:
+
+```bash
+# テストコミット
+echo "# GitHub Organization Transfer Test" >> docs/org-transfer-test.md
+git add docs/org-transfer-test.md
+git commit -m "test: Organization移管後の接続確認 AB#508"
+git push origin main
+```
+
+**確認**:
+- Azure DevOps → Boards → Work Item #508 を開く
+- 「Development」セクションにコミットがリンクされていることを確認
+- リンクされていればGitHub接続成功！
+
+---
+
+**よくあるトラブルシューティング**:
+
+| 症状 | 原因 | 解決方法 |
+|------|------|----------|
+| Organizationが選択肢に出ない | OAuth権限未承認 | 方法1で権限承認 |
+| 個人リポジトリしか表示されない | Organization権限がない | GitHub Settings > Applicationsで確認 |
+| "Access denied" エラー | Organizationのオーナーでない | オーナーに権限承認を依頼 |
+| リポジトリ一覧が空 | GitHub App未インストール | 方法3でGitHub Appをインストール |
+
+---
+
 ##### 3.0.3 Organization 内でチームを作成
 
 **手順**:
@@ -541,6 +657,10 @@ EOF
 
 git add src/webapp/package.json
 git commit -m "fixes AB#4: 初期バージョン1.0.0設定"
+
+# 初期バージョンのタグ作成
+git tag v1.0.0
+git push origin v1.0.0
 ```
 
 **SemVer理解**:
