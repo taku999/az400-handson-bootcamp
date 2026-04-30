@@ -541,6 +541,10 @@ EOF
 
 git add src/webapp/package.json
 git commit -m "fixes AB#4: 初期バージョン1.0.0設定"
+
+# 初期バージョンのタグ作成
+git tag v1.0.0
+git push origin v1.0.0
 ```
 
 **SemVer理解**:
