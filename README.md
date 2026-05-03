@@ -44,6 +44,96 @@ az400-handson-bootcamp/
 └── WorkItems/                       ← Azure Boards Work Item CSV
 ```
 
+## 🏛️ Azure構成図
+
+このハンズオンで構築するAzureリソースの全体像：
+
+```mermaid
+graph TB
+    subgraph "Azure Resource Group: rg-az400-handson"
+        subgraph "Compute"
+            ASP[App Service Plan<br/>Linux, F1 Free]
+            WebApp[Web App<br/>Node.js 18<br/>Managed Identity有効]
+        end
+        
+        subgraph "Security & Identity"
+            KV[Key Vault<br/>Access Policies<br/>シークレット管理]
+            MI[System-Assigned<br/>Managed Identity]
+        end
+        
+        subgraph "Monitoring"
+            AI[Application Insights<br/>テレメトリ収集<br/>KQLクエリ]
+        end
+        
+        subgraph "Storage"
+            SA[Storage Account<br/>汎用v2<br/>LRS]
+        end
+        
+        subgraph "Database (オプション)"
+            SQL[Azure SQL Database<br/>Basic tier<br/>AAD認証]
+        end
+    end
+    
+    subgraph "CI/CD"
+        GHA[GitHub Actions<br/>ビルド・デプロイ]
+        ADP[Azure Pipelines<br/>エンタープライズCI/CD]
+    end
+    
+    subgraph "Work Item Tracking"
+        Boards[Azure Boards<br/>Work Item管理<br/>AB#記法連携]
+    end
+    
+    %% 関連性
+    ASP --> WebApp
+    WebApp --> MI
+    MI -.Access Policies.-> KV
+    MI -.AAD認証.-> SQL
+    WebApp --> AI
+    WebApp --> SA
+    
+    GHA -.デプロイ.-> WebApp
+    ADP -.デプロイ.-> WebApp
+    Boards -.統合.-> GHA
+    
+    %% スタイリング
+    classDef compute fill:#0078D4,stroke:#002050,stroke-width:2px,color:#fff
+    classDef security fill:#FF6347,stroke:#8B0000,stroke-width:2px,color:#fff
+    classDef monitor fill:#50E6FF,stroke:#005B70,stroke-width:2px,color:#000
+    classDef storage fill:#FFB900,stroke:#805B00,stroke-width:2px,color:#000
+    classDef database fill:#7FBA00,stroke:#3F5D00,stroke-width:2px,color:#fff
+    classDef cicd fill:#00C853,stroke:#005A24,stroke-width:2px,color:#fff
+    classDef boards fill:#9C27B0,stroke:#4E1358,stroke-width:2px,color:#fff
+    
+    class ASP,WebApp compute
+    class KV,MI security
+    class AI monitor
+    class SA storage
+    class SQL database
+    class GHA,ADP cicd
+    class Boards boards
+```
+
+**主要コンポーネント**:
+
+| リソース | 目的 | Day |
+|---------|------|-----|
+| **App Service Plan** | Webアプリホスティング（F1 Free tier） | Day 1 |
+| **Web App** | Node.jsアプリケーション実行環境 | Day 1 |
+| **Key Vault** | シークレット安全管理（Access Policies） | Day 2 |
+| **Managed Identity** | パスワードレス認証 | Day 2 |
+| **Application Insights** | APM・ログ分析・KQLクエリ実践 | Day 2 |
+| **Storage Account** | 静的ファイル・ログ保存 | Day 1 |
+| **Azure SQL Database** | （オプション）リレーショナルDB | Day 2 |
+| **GitHub Actions** | CI/CDパイプライン実装 | Day 3 |
+| **Azure Pipelines** | エンタープライズCI/CD比較 | Day 3 |
+| **Azure Boards** | Work Item管理・GitHub統合 | Day 1 |
+
+**セキュリティポイント（AZ-400重要）**:
+- 🔒 **Key Vault**: データプレーン（Access Policies）vs 管理プレーン（IAM）の違い
+- 🆔 **Managed Identity**: パスワード不要のAzure認証
+- 🔐 **シークレット管理**: ハードコード禁止、GitHub Secrets使用
+- 🛡️ **最小権限の原則**: RBACロール適切な割り当て
+
 ## 🚀 クイックスタート
 
 ### 前提条件

@@ -135,7 +135,7 @@ resource keyVaultRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04
 
 **🔒 セキュリティベストプラクティス**:
 
-```bash
+```powershell
 # ❌ NG例: Bicepファイルにシークレット値をハードコード（絶対禁止）
 # resource secret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
 #   properties: { value: 'my-secret-password-123' }  // 🚫 危険！
@@ -146,60 +146,243 @@ resource keyVaultRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04
 
 **手順1: Key Vaultデプロイ（シークレットなし）**
 
-```bash
+```powershell
 # Bicepデプロイ（シークレット値は含まない）
-az deployment group create \
-  --resource-group rg-az400-handson \
-  --template-file infra/bicep/main.bicep \
+az deployment group create `
+  --resource-group rg-az400-handson `
+  --template-file infra/bicep/main.bicep `
   --parameters infra/bicep/parameters/dev.parameters.json
 
 # Key Vault名を取得
-KEY_VAULT_NAME=$(az deployment group show \
-  --resource-group rg-az400-handson \
-  --name main \
-  --query properties.outputs.keyVaultName.value -o tsv)
+$KEY_VAULT_NAME = az deployment group show `
+  --resource-group rg-az400-handson `
+  --name main `
+  --query properties.outputs.keyVaultName.value -o tsv
 
-echo "Key Vault名: $KEY_VAULT_NAME"
+Write-Host "Key Vault名: $KEY_VAULT_NAME"
 ```
 
-**手順2: Azure CLIでシークレットを安全に設定**
+**手順2: Web AppにKEY_VAULT_URL環境変数を設定（Bicep優先）**
 
-```bash
-# 方法1: インタラクティブに入力（推奨）
-az keyvault secret set \
-  --vault-name $KEY_VAULT_NAME \
-  --name DatabaseConnectionString \
-  --value "$(read -sp 'DB接続文字列を入力: ' SECRET && echo $SECRET)"
+Web Appが`app.js`内でKey Vaultに接続するには、環境変数`KEY_VAULT_URL`が必要です。
 
-# 方法2: 環境変数から設定（CI/CDパイプライン用）
-az keyvault secret set \
-  --vault-name $KEY_VAULT_NAME \
-  --name ApiKey \
-  --value "$API_KEY_SECRET"  # GitHub Secrets等から注入
+**⚠️ 循環依存の問題と解決策**
 
-# 方法3: ファイルから読み込み（.gitignore必須）
-az keyvault secret set \
-  --vault-name $KEY_VAULT_NAME \
-  --name SshPrivateKey \
-  --file ~/.ssh/id_rsa  # ファイル内容をシークレットとして保存
+通常のパラメータ渡しでは循環依存が発生します：
+- Web App → Key Vault URL が必要
+- Key Vault → Web AppのManaged Identity Object ID が必要
+
+**解決策: 段階的デプロイ**
+
+`infra/bicep/main.bicep`で、Key Vaultデプロイ後にWeb Appの設定を更新：
+
+```bicep
+// 1. Web App（Managed Identity付き） - 初回デプロイ
+module webApp 'modules/webapp.bicep' = {
+  name: 'webAppDeployment'
+  params: {
+    webAppName: '${resourcePrefix}-${environmentName}-webapp'
+    appServicePlanId: appServicePlan.id
+    location: location
+    appInsightsConnectionString: appInsights.outputs.connectionString
+    // KEY_VAULT_URLはまだ設定しない
+  }
+}
+
+// 2. Key Vault - Web AppのManaged Identityを使用
+module keyVault 'modules/keyvault.bicep' = {
+  name: 'keyVaultDeployment'
+  params: {
+    keyVaultName: '${resourcePrefix}-${environmentName}-kv'
+    location: location
+    managedIdentityObjectId: webApp.outputs.managedIdentityPrincipalId
+  }
+}
+
+// 3. Web AppにKEY_VAULT_URL環境変数を追加（Key Vaultデプロイ後）
+resource webAppConfig 'Microsoft.Web/sites/config@2023-01-01' = {
+  name: '${webApp.outputs.webAppName}/appsettings'
+  properties: {
+    WEBSITES_ENABLE_APP_SERVICE_STORAGE: 'false'
+    DOCKER_ENABLE_CI: 'true'
+    APPLICATIONINSIGHTS_CONNECTION_STRING: appInsights.outputs.connectionString
+    KEY_VAULT_URL: keyVault.outputs.keyVaultUri  // ← ここで追加
+    PORT: '3000'
+  }
+}
 ```
 
-**手順3: 設定確認（値は表示しない）**
+**⚠️ 注意**: 上記はコンセプト説明用です。実際のmain.bicepでは`name`プロパティで`'${resourcePrefix}-${environmentName}-webapp/appsettings'`を使用します（モジュールoutputは名前に使えないため）。
 
-```bash
+**方法1: Bicep自動設定（推奨）**
+
+```powershell
+# 1回のデプロイで全て設定される
+az deployment group create `
+  --resource-group rg-az400-handson `
+  --template-file infra/bicep/main.bicep `
+  --parameters infra/bicep/parameters/dev.parameters.json
+
+# デプロイ完了後、KEY_VAULT_URLが自動設定される
+```
+
+**確認**
+
+```powershell
+$WEBAPP_NAME = az webapp list -g rg-az400-handson --query "[0].name" -o tsv
+
+# KEY_VAULT_URL環境変数の確認
+az webapp config appsettings list `
+  --name $WEBAPP_NAME `
+  --resource-group rg-az400-handson `
+  --query "[?name=='KEY_VAULT_URL'].{Name:name, Value:value}" -o table
+
+# 期待される出力:
+# Name            Value
+# --------------  --------------------------------------------------
+# KEY_VAULT_URL   https://az400-dev-kv-xxxxx.vault.azure.net/
+```
+
+**方法2: Azure CLI手動設定（Bicepデプロイ前の場合）**
+
+既にデプロイ済みで、Bicepを再デプロイしたくない場合：
+
+```powershell
+# リソース名を取得
+$KEY_VAULT_NAME = az keyvault list -g rg-az400-handson --query "[0].name" -o tsv
+$WEBAPP_NAME = az webapp list -g rg-az400-handson --query "[0].name" -o tsv
+
+# 環境変数を追加
+az webapp config appsettings set `
+  --name $WEBAPP_NAME `
+  --resource-group rg-az400-handson `
+  --settings KEY_VAULT_URL="https://$KEY_VAULT_NAME.vault.azure.net/"
+
+Write-Host "✅ KEY_VAULT_URL設定完了: https://$KEY_VAULT_NAME.vault.azure.net/"
+```
+
+**手順2.5: CLI実行ユーザーに権限を付与（シークレット設定のため）**
+
+⚠️ **重要**: Bicepで設定される権限はWeb AppのManaged Identity用です。Azure CLIでシークレットを設定するには、**CLI実行ユーザー自身**にも権限が必要です。
+
+```powershell
+# 現在のユーザーのObject IDを取得
+$CURRENT_USER_OID = az ad signed-in-user show --query id -o tsv
+
+# Key Vault名を取得（まだ設定していない場合）
+$KEY_VAULT_NAME = az keyvault list -g rg-az400-handson --query "[0].name" -o tsv
+
+# Access Policyを追加（secrets の get, list, set 権限）
+az keyvault set-policy `
+  --name $KEY_VAULT_NAME `
+  --object-id $CURRENT_USER_OID `
+  --secret-permissions get list set
+
+Write-Host "✅ CLI実行ユーザーに権限付与完了"
+```
+
+**AZ-400試験ポイント**:
+- **Data Plane権限**: Access Policy（secrets操作） ← シークレット設定に必要
+- **Management Plane権限**: IAM/RBAC（Key Vault自体の管理） ← リソース管理に必要
+
+**手順3: 本ハンズオン用シークレットを設定**
+
+**前提: 環境変数の設定**
+
+まず、Key Vault名を取得して変数に設定します（手順2.5で設定済みの場合はスキップ）：
+
+```powershell
+# Key Vault名を取得
+$KEY_VAULT_NAME = az keyvault list -g rg-az400-handson --query "[0].name" -o tsv
+
+# 確認
+Write-Host "Key Vault名: $KEY_VAULT_NAME"
+```
+
+**3-1. 必須シークレット（アプリケーション動作用）**
+
+```powershell
+# DatabaseConnectionString（app.jsの /secret エンドポイントで使用）
+# 注: SQL Databaseは未デプロイですが、動作確認用に設定
+az keyvault secret set `
+  --vault-name $KEY_VAULT_NAME `
+  --name DatabaseConnectionString `
+  --value "Server=tcp:demo.database.windows.net,1433;Database=demoDb;Authentication=Active Directory Default;Encrypt=true;"
+
+Write-Host "✅ DatabaseConnectionString設定完了（デモ用）"
+```
+
+**3-2. 推奨シークレット（学習目的）**
+
+```powershell
+# APIキー（外部API連携の例）
+az keyvault secret set `
+  --vault-name $KEY_VAULT_NAME `
+  --name ApiKey `
+  --value "demo-api-key-12345-for-learning"
+
+# アプリケーションシークレット（認証の例）
+az keyvault secret set `
+  --vault-name $KEY_VAULT_NAME `
+  --name AppSecret `
+  --value "demo-app-secret-67890"
+
+Write-Host "✅ 学習用シークレット設定完了"
+```
+
+**3-3. セキュア入力の練習（AZ-400重要スキル）**
+
+⚠️ **注意**: 以下のコード全体を一度に実行してください（1行ずつ実行すると変数が失われます）
+
+```powershell
+# パスワード非表示入力（入力は画面に表示されない）
+$SecureInput = Read-Host "パスワードを入力（入力は表示されません）" -AsSecureString
+
+# SecureString → プレーンテキストに変換（Azure CLIで使用するため）
+$BSTR = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($SecureInput)
+$PlainPassword = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($BSTR)
+
+# Key Vaultに保存
+az keyvault secret set `
+  --vault-name $KEY_VAULT_NAME `
+  --name SecurePassword `
+  --value $PlainPassword
+
+# メモリから削除（セキュリティのため）
+$PlainPassword = $null
+[System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($BSTR)
+
+Write-Host "✅ セキュアパスワード設定完了"
+```
+
+**別の方法: 1行で実行**
+
+```powershell
+# プロンプトなしで直接値を指定（学習目的）
+az keyvault secret set `
+  --vault-name $KEY_VAULT_NAME `
+  --name SecurePassword `
+  --value "MySecureP@ssw0rd123!"
+```
+
+**手順4: 設定確認とアプリケーションテスト**
+
+**4-1. シークレット確認（値は表示しない）**
+
+```powershell
 # シークレット一覧（値は表示されない）
 az keyvault secret list --vault-name $KEY_VAULT_NAME --output table
 
 # 特定シークレットの存在確認（値は表示しない）
-az keyvault secret show \
-  --vault-name $KEY_VAULT_NAME \
-  --name DatabaseConnectionString \
+az keyvault secret show `
+  --vault-name $KEY_VAULT_NAME `
+  --name ApiKey `
   --query "name" -o tsv
 
 # ⚠️ 値を確認する場合（本番環境では慎重に）
-az keyvault secret show \
-  --vault-name $KEY_VAULT_NAME \
-  --name DatabaseConnectionString \
+az keyvault secret show `
+  --vault-name $KEY_VAULT_NAME `
+  --name ApiKey `
   --query "value" -o tsv
 ```
 
@@ -211,15 +394,216 @@ az keyvault secret show \
 | GitHub Actionsからの設定 | GitHub Secrets → 環境変数 → az CLI | ❌ YAMLにパスワード記述 |
 | ローカル開発環境 | .env（.gitignore済） → CLI設定 | ❌ コミット可能なファイルに保存 |
 | CI/CDパイプライン | Variable Groups（暗号化） | ❌ パイプライン定義にプレーンテキスト |
+| **Bicep循環依存** | **リソース分割・段階的デプロイ** | **❌ 相互参照** |
 
-**セキュアパラメータの使用（代替案）**:
+**🔧 Bicep循環依存の解決パターン（頻出）**:
 
 ```bicep
-// シークレット値を外部パラメータから受け取る場合
-@secure()
-param databaseConnectionString string = ''  // デフォルト空文字
+// ❌ NG: 循環依存が発生
+module webApp 'webapp.bicep' = {
+  params: { keyVaultUrl: keyVault.outputs.uri }
+}
+module keyVault 'keyvault.bicep' = {
+  params: { identityId: webApp.outputs.identityId }  // 循環！
+}
 
-resource secret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (databaseConnectionString != '') {
+// ✅ OK: 段階的デプロイで解決
+module webApp 'webapp.bicep' = { ... }
+module keyVault 'keyvault.bicep' = {
+  params: { identityId: webApp.outputs.identityId }  // 一方向
+}
+resource appSettings 'Microsoft.Web/sites/config@2023-01-01' = {
+  name: 'myapp-dev-webapp/appsettings'  // パラメータから直接構築
+  properties: { KEY_VAULT_URL: keyVault.outputs.uri }
+}
+```
+
+```bash
+# 期待される出力:
+# Name                          Enabled
+# ----------------------------  ---------
+# DatabaseConnectionString      True
+# ApiKey                        True
+# AppSecret                     True
+# SecurePassword                True
+
+# 特定シークレットの存在確認（値は表示しない）
+az keyvault secret show `
+  --vault-name $KEY_VAULT_NAME `
+  --name DatabaseConnectionString `
+  --query "name" -o tsv
+
+# ⚠️ 値を確認する場合（本番環境では慎重に）
+az keyvault secret show `
+  --vault-name $KEY_VAULT_NAME `
+  --name ApiKey `
+  --query "value" -o tsv
+```
+
+**4-2. Web Appを起動**
+
+⚠️ **重要**: デプロイ直後やリソース作成後、Web Appが停止状態になっている場合があります。
+
+```powershell
+# Web App名を取得（まだ設定していない場合）
+$WEBAPP_NAME = az webapp list -g rg-az400-handson --query "[0].name" -o tsv
+
+# Web Appの状態を確認
+az webapp show `
+  --name $WEBAPP_NAME `
+  --resource-group rg-az400-handson `
+  --query state -o tsv
+
+# Web Appを起動
+az webapp start `
+  --name $WEBAPP_NAME `
+  --resource-group rg-az400-handson
+
+Write-Host "✅ Web App起動完了: $WEBAPP_NAME"
+
+# 起動確認（数秒待つ）
+Start-Sleep -Seconds 10
+az webapp show `
+  --name $WEBAPP_NAME `
+  --resource-group rg-az400-handson `
+  --query state -o tsv
+# 期待される出力: Running
+```
+
+**⚠️ 重要な注意事項**
+
+この時点（Day 2）では、**Azure インフラのみ**デプロイされており、**アプリケーションコードはまだデプロイされていません**。
+
+- ✅ **デプロイ済み**: Web App、Key Vault、Application Insights（インフラ）
+- ❌ **未デプロイ**: Node.js アプリケーション（`src/webapp/app.js`）
+- 📅 **Day 3で実施**: CI/CDパイプラインによるアプリケーションデプロイ
+
+そのため、**現時点でWebアプリにアクセスすると404エラーが返ります**（正常な動作）。
+
+**4-3. Web Appの状態確認（現時点での確認）**
+
+```powershell
+# Web App URLを取得
+$WEBAPP_URL = az webapp show `
+  --name $WEBAPP_NAME `
+  --resource-group rg-az400-handson `
+  --query defaultHostName -o tsv
+
+# アクセス確認（404が返るのが正常）
+Invoke-RestMethod -Uri "https://$WEBAPP_URL/health"
+# 期待される結果: 404 Not Found（アプリ未デプロイのため）
+
+Write-Host "ℹ️  404エラーが出るのは正常です（アプリケーション未デプロイ）"
+Write-Host "ℹ️  Day 3でCI/CDパイプラインを使ってデプロイします"
+```
+
+**4-4. 環境変数とManaged Identity設定の確認（重要）**
+
+アプリケーションはまだデプロイされていませんが、**インフラの設定が正しいか**を確認しましょう：
+
+```powershell
+# 1. KEY_VAULT_URL環境変数の確認
+Write-Host "=== KEY_VAULT_URL環境変数 ==="
+az webapp config appsettings list `
+  --name $WEBAPP_NAME `
+  --resource-group rg-az400-handson `
+  --query "[?name=='KEY_VAULT_URL'].{Name:name, Value:value}" -o table
+# 期待: KEY_VAULT_URL   https://az400-dev-kv-xxxxx.vault.azure.net/
+
+# 2. Managed Identityの有効化確認
+Write-Host "`n=== Managed Identity ==="
+az webapp identity show `
+  --name $WEBAPP_NAME `
+  --resource-group rg-az400-handson `
+  --query "{Type:type, PrincipalId:principalId}" -o table
+# 期待: Type=SystemAssigned, PrincipalId=（GUID）
+
+# 3. Key VaultのAccess Policies確認
+Write-Host "`n=== Key Vault Access Policies ==="
+$WEBAPP_PRINCIPAL_ID = az webapp identity show `
+  --name $WEBAPP_NAME `
+  --resource-group rg-az400-handson `
+  --query principalId -o tsv
+
+az keyvault show `
+  --name $KEY_VAULT_NAME `
+  --query "properties.accessPolicies[?objectId=='$WEBAPP_PRINCIPAL_ID'].permissions.secrets" -o json
+# 期待: ["get","list"]
+
+Write-Host "`n✅ Day 2のインフラ設定は完了しています"
+Write-Host "📅 Day 3でアプリケーションをデプロイすると、/secretエンドポイントが動作します"
+```
+
+**【オプション】今すぐテストしたい場合の手動デプロイ**
+
+Day 3を待たずに動作確認したい場合は、以下の手動デプロイを実行できます：
+
+```powershell
+# Azure Container Registryを作成（まだない場合）
+$ACR_NAME = "az400acr$(Get-Random -Minimum 1000 -Maximum 9999)"
+az acr create `
+  --name $ACR_NAME `
+  --resource-group rg-az400-handson `
+  --sku Basic `
+  --admin-enabled true
+
+# Dockerイメージをビルド＆プッシュ
+az acr build `
+  --registry $ACR_NAME `
+  --image webapp:latest `
+  --file src/webapp/Dockerfile `
+  src/webapp
+
+# Web AppにACR認証情報を設定
+$ACR_LOGIN_SERVER = az acr show --name $ACR_NAME --query loginServer -o tsv
+$ACR_USERNAME = az acr credential show --name $ACR_NAME --query username -o tsv
+$ACR_PASSWORD = az acr credential show --name $ACR_NAME --query "passwords[0].value" -o tsv
+
+az webapp config container set `
+  --name $WEBAPP_NAME `
+  --resource-group rg-az400-handson `
+  --docker-custom-image-name "$ACR_LOGIN_SERVER/webapp:latest" `
+  --docker-registry-server-url "https://$ACR_LOGIN_SERVER" `
+  --docker-registry-server-user $ACR_USERNAME `
+  --docker-registry-server-password $ACR_PASSWORD
+
+# 再起動
+az webapp restart --name $WEBAPP_NAME --resource-group rg-az400-handson
+
+Write-Host "⏳ デプロイ完了まで1-2分待機..."
+Start-Sleep -Seconds 60
+
+# 動作確認
+Invoke-RestMethod -Uri "https://$WEBAPP_URL/health"
+
+# 期待される出力:
+# 動作確認
+Invoke-RestMethod -Uri "https://$WEBAPP_URL/health"
+# 期待される出力: 
+# {
+#   "status": "healthy",
+#   "timestamp": "2024-01-01T12:00:00.000Z"
+# }
+
+Invoke-RestMethod -Uri "https://$WEBAPP_URL/secret"
+# 期待される出力:
+# {
+#   "secretName": "DatabaseConnectionString",
+#   "retrieved": true,
+#   "message": "✅ Secret retrieved from Key Vault successfully!",
+#   "vaultUrl": "https://az400-dev-kv-xxxxx.vault.azure.net/"
+# }
+```
+
+**4-5. トラブルシューティング（手動デプロイした場合）**
+
+手動デプロイを実行した場合のエラー確認：
+
+```powershell
+# Web Appのログ確認
+az webapp log tail `
+  --name $WEBAPP_NAME `
+  --resource-group rg-az400-handsonft.KeyVault/vaults/secrets@2023-07-01' = if (databaseConnectionString != '') {
   parent: keyVault
   name: 'DatabaseConnectionString'
   properties: {
@@ -228,24 +612,24 @@ resource secret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (databaseCon
 }
 ```
 
-```bash
+```powershell
 # パラメータファイルで渡す場合（.gitignore必須）
-az deployment group create \
+az deployment group create `
   --parameters databaseConnectionString="$DB_CONNECTION_STRING"
 ```
 
 **Git管理のベストプラクティス**:
 
-```bash
+```powershell
 # .gitignoreに追加（必須）
-cat >> .gitignore << EOF
+@"
 # シークレット関連ファイル（絶対コミット禁止）
 *.secrets.json
 *.secrets.*.json
 .env
 .env.local
 **/appsettings.Development.json
-EOF
+"@ | Out-File -FilePath .gitignore -Append -Encoding utf8
 
 # 既にコミット済みのシークレットを削除
 git rm --cached infra/bicep/parameters/*.secrets.json
@@ -285,15 +669,15 @@ bash -c "chmod +x scripts/setup/set-keyvault-secrets.sh"
 
 **実行手順**:
 
-```bash
+```powershell
 # 1. Azure CLIでログイン
 az login
 
 # 2. リソースグループを環境変数に設定
-export RESOURCE_GROUP="rg-az400-handson"
+$env:RESOURCE_GROUP = "rg-az400-handson"
 
 # 3. スクリプトを実行
-./scripts/setup/set-keyvault-secrets.sh
+.\scripts\setup\set-keyvault-secrets.sh
 
 # または
 bash scripts/setup/set-keyvault-secrets.sh
@@ -351,12 +735,12 @@ API Keyを入力 (スキップ可): ************
 
 **必須シークレット**:
 
-```bash
+```powershell
 # 1. Azure認証情報を作成
-az ad sp create-for-rbac \
-  --name "github-actions-az400" \
-  --role contributor \
-  --scopes /subscriptions/<YOUR_SUBSCRIPTION_ID>/resourceGroups/rg-az400-handson \
+az ad sp create-for-rbac `
+  --name "github-actions-az400" `
+  --role contributor `
+  --scopes /subscriptions/<YOUR_SUBSCRIPTION_ID>/resourceGroups/rg-az400-handson `
   --sdk-auth
 
 # 出力されたJSONをGitHub SecretsのAZURE_CREDENTIALSに設定
@@ -382,7 +766,7 @@ az ad sp create-for-rbac \
 
 2. **GitHub CLIで設定**:
 
-```bash
+```powershell
 # GitHub CLIインストール確認
 gh --version
 
@@ -432,18 +816,18 @@ Run workflow
 
 ##### 方法3: Azure CLIでの個別設定
 
-```bash
+```powershell
 # Key Vault名を取得
-KEY_VAULT_NAME=$(az deployment group show \
-  --resource-group rg-az400-handson \
-  --name main \
-  --query properties.outputs.keyVaultName.value -o tsv)
+$KEY_VAULT_NAME = az deployment group show `
+  --resource-group rg-az400-handson `
+  --name main `
+  --query properties.outputs.keyVaultName.value -o tsv
 
 # データベース接続文字列を自動生成
-SQL_SERVER_FQDN=$(az sql server show \
-  --name az400-dev-sqlserver \
-  --resource-group rg-az400-handson \
-  --query fullyQualifiedDomainName -o tsv)
+$SQL_SERVER_FQDN = az sql server show `
+  --name az400-dev-sqlserver `
+  --resource-group rg-az400-handson `
+  --query fullyQualifiedDomainName -o tsv
 
 DB_CONNECTION_STRING="Server=tcp:${SQL_SERVER_FQDN},1433;Database=az400db;Authentication=Active Directory Default;Encrypt=true;TrustServerCertificate=false;"
 
@@ -613,11 +997,11 @@ output webAppUrl string = 'https://${webApp.outputs.webAppName}.azurewebsites.ne
 
 #### 2.4 デプロイ実行
 
-```bash
+```powershell
 # Bicepデプロイ
-az deployment group create \
-  --resource-group rg-az400-handson \
-  --template-file infra/bicep/main.bicep \
+az deployment group create `
+  --resource-group rg-az400-handson `
+  --template-file infra/bicep/main.bicep `
   --parameters infra/bicep/parameters/dev.parameters.json
 
 # 確認
@@ -774,7 +1158,7 @@ CMD ["npm", "start"]
 
 #### 3.3 デプロイ
 
-```bash
+```powershell
 # 依存関係インストール
 cd src/webapp
 npm install
@@ -791,9 +1175,9 @@ docker tag az400webapp:latest az400acr.azurecr.io/az400webapp:latest
 docker push az400acr.azurecr.io/az400webapp:latest
 
 # Web Appにデプロイ
-az webapp config container set \
-  --name az400-dev-webapp \
-  --resource-group rg-az400-handson \
+az webapp config container set `
+  --name az400-dev-webapp `
+  --resource-group rg-az400-handson `
   --docker-custom-image-name az400acr.azurecr.io/az400webapp:latest
 ```
 
