@@ -42,6 +42,7 @@ resource webApp 'Microsoft.Web/sites@2023-01-01' = {
           name: 'PORT'
           value: '3000'
         }
+        // KEY_VAULT_URLは main.bicep の webAppConfig リソースで追加
       ]
     }
   }
